@@ -257,6 +257,23 @@ what we publish.
 
 ### Library changes
 
+- The `Writable` trait now has a default implementation of `write_to()` that uses
+  reflection to automatically format all struct fields. This means simple structs
+  can conform to `Writable` without implementing any methods:
+
+  ```mojo
+  @fieldwise_init
+  struct Point(Writable):
+      var x: Float64
+      var y: Float64
+
+  var p = Point(1.5, 2.7)
+  print(p)  # Point(x=1.5, y=2.7)
+  ```
+
+  All fields must conform to `Writable`. Override `write_to()` for custom
+  formatting.
+
 - `PythonObject` now supports implicit conversion from `None`, allowing more
   natural Python-like code:
 
@@ -272,6 +289,12 @@ what we publish.
   `@implicit`, allowing code like `var x: IndexList[3] = 5` which would create
   `(5, 5, 5)`. This implicit conversion has been removed to improve type safety.
   Use explicit construction instead: `IndexList[3](5)`.
+
+- The `ConvertibleFromPython` trait and associated initializers now have a
+  required keyword argument. Before: `Int(pyObj)`. After: `Int(py=pyObj)`. This
+  avoids ambiguities in cases where either multiple overloads could apply, or
+  where implicit conversions to `PythonObject` could mask that a Python
+  operation was happening.
 
 - The `inlined_assembly` function is now publicly exported from the `sys` module,
   allowing users to embed raw assembly instructions directly into Mojo code.
@@ -607,6 +630,15 @@ what we publish.
   `io`. These traits are not directly related to binary i/o, but are rather
   closely tied to type/value string formatting.
 
+- The `Writable` trait now supports debug formatting through an optional
+  `write_repr_to()` method, called by `repr()` and the `{!r}` format specifier.
+  Additionally, `repr()` and string formatting methods (`.format()` on `String`,
+  `StringSlice`, and `StringLiteral`) now accept `Writable` types, enabling
+  efficient formatting without intermediate string allocations. To preserve
+  existing behavior, types implementing both `Stringable & Representable` and
+  `Writable` will continue using `Stringable & Representable` methods; only
+  types implementing `Writable` alone will use the new code paths.
+
 - `Writer` has been reworked to only support UTF-8 data instead of arbitrary
   `Byte` sequences. The `write_bytes` method has been replaced with
   `write_string`.
@@ -636,6 +668,9 @@ what we publish.
 - External origins are now expressed using type level
   `{Mut,Immut,}ExternalOrigin` aliases instead of being spelled like
   `Origin[True].external`, improving consistency with other origin types.
+
+- `StringableRaising` has been deprecated and its usages in the stdlib have
+  been removed.
 
 ### Tooling changes
 
@@ -697,6 +732,15 @@ what we publish.
   directly. This is useful for integrating Mojo's fix-it suggestions into
   external tooling workflows. The flag is mutually exclusive with
   `--experimental-fixit` (which applies fix-its directly).
+- The Mojo compiler now supports the `-Xlinker` flag to pass options on
+  directly to the linker, e.g.,
+
+  ```console
+  mojo build -Xlinker -lfoo main.mojo
+  ```
+
+  Note: this option only has an effect with `mojo build`. With `mojo run`, the
+  arguments are ignored and a warning is issued.
 
 ### Experimental changes
 
@@ -760,11 +804,13 @@ or removed in future releases.
 
 ### 🛠️ Fixed
 
+- Mojo no longer complains about "cannot infer parameter X" when unrelated type
+  checking errors happen in complex parametric code.  It now gives much more
+  useful and actionable error messages in these cases.
 - `Codepoint.unsafe_decode_utf8_codepoint()` no longer returns `Codepoint(0)`
   (NUL) when passed an empty span. Instead, a `debug_assert` now enforces the
   requirement that the input span be non-empty, consistent with the function's
   existing safety contract.
-
 - [Issue #5732](https://github.com/modular/modular/issues/5732): Compiler
   crash when using `get_type_name` with types containing constructor calls in
   their parameters (like `A[B(True)]`) when extracted via `struct_field_types`.
